@@ -22,7 +22,7 @@ import (
 	"github.com/99designs/gqlgen/handler"
 	"github.com/go-kit/kit/endpoint"
 
-	"github.com/banzaicloud/cloudinfo/.gen/api/graphql"
+	"github.com/banzaicloud/cloudinfo/gen/api/graphql"
 	"github.com/banzaicloud/cloudinfo/internal/cloudinfo"
 )
 

@@ -51,6 +51,7 @@ type Ec2Infoer struct {
 	ec2Describer func(region string) Ec2Describer
 	partition    endpoints.Partition
 	log          cloudinfo.Logger
+	region       string
 }
 
 // Ec2Describer interface for operations describing EC2 artifacts. (a subset of the Ec2 cli operations used by this app)
@@ -66,7 +67,6 @@ func NewAmazonInfoer(config Config, logger cloudinfo.Logger) (*Ec2Infoer, error)
 	if err != nil {
 		return nil, errors.Wrap(err, "creating pricing aws config")
 	}
-
 	psess, err := session.NewSession(pconfig.WithRegion(config.Pricing.Region))
 	if err != nil {
 		return nil, errors.Wrap(err, "creating pricing aws session")
@@ -76,7 +76,6 @@ func NewAmazonInfoer(config Config, logger cloudinfo.Logger) (*Ec2Infoer, error)
 	if err != nil {
 		return nil, errors.Wrap(err, "creating ec2 aws config")
 	}
-
 	esess, err := session.NewSession(econfig)
 	if err != nil {
 		return nil, errors.Wrap(err, "creating ec2 aws session")
@@ -112,6 +111,7 @@ func NewAmazonInfoer(config Config, logger cloudinfo.Logger) (*Ec2Infoer, error)
 		},
 		partition: partition,
 		log:       logger,
+		region: config.Region,
 	}, nil
 }
 
@@ -430,11 +430,11 @@ func (e *Ec2Infoer) GetRegions(service string) (map[string]string, error) {
 
 // GetZones returns the availability zones in a region
 func (e *Ec2Infoer) GetZones(region string) ([]string, error) {
-	logger := log.WithFields(e.log, map[string]interface{}{"region": region})
+	logger := log.WithFields(e.log, map[string]interface{}{"region": e.region})
 	logger.Debug("getting zones")
 
 	var zones []string
-	azs, err := e.ec2Describer(region).DescribeAvailabilityZones(&ec2.DescribeAvailabilityZonesInput{})
+	azs, err := e.ec2Describer(e.region).DescribeAvailabilityZones(&ec2.DescribeAvailabilityZonesInput{})
 	if err != nil {
 		return nil, err
 	}
@@ -484,9 +484,9 @@ func (e *Ec2Infoer) getSpotPricesFromPrometheus(region string) (map[string]types
 }
 
 func (e *Ec2Infoer) getCurrentSpotPrices(region string) (map[string]types.SpotPriceInfo, error) {
-	logger := log.WithFields(e.log, map[string]interface{}{"region": region})
+	logger := log.WithFields(e.log, map[string]interface{}{"region": e.region})
 	priceInfo := make(map[string]types.SpotPriceInfo)
-	err := e.ec2Describer(region).DescribeSpotPriceHistoryPages(&ec2.DescribeSpotPriceHistoryInput{
+	err := e.ec2Describer(e.region).DescribeSpotPriceHistoryPages(&ec2.DescribeSpotPriceHistoryInput{
 		StartTime:           aws.Time(time.Now()),
 		ProductDescriptions: []*string{aws.String("Linux/UNIX")},
 	}, func(history *ec2.DescribeSpotPriceHistoryOutput, lastPage bool) bool {
@@ -511,7 +511,7 @@ func (e *Ec2Infoer) getCurrentSpotPrices(region string) (map[string]types.SpotPr
 
 // GetCurrentPrices returns the current spot prices of every instance type in every availability zone in a given region
 func (e *Ec2Infoer) GetCurrentPrices(region string) (map[string]types.Price, error) {
-	logger := log.WithFields(e.log, map[string]interface{}{"region": region})
+	logger := log.WithFields(e.log, map[string]interface{}{"region": e.region})
 	var spotPrices map[string]types.SpotPriceInfo
 	var err error
 	if e.prometheus != nil {
@@ -523,7 +523,7 @@ func (e *Ec2Infoer) GetCurrentPrices(region string) (map[string]types.Price, err
 
 	if len(spotPrices) == 0 {
 		logger.Debug("getting current spot prices directly from the AWS API")
-		spotPrices, err = e.getCurrentSpotPrices(region)
+		spotPrices, err = e.getCurrentSpotPrices(e.region)
 		if err != nil {
 			logger.Error("failed to retrieve current spot prices")
 			return nil, err
@@ -537,7 +537,7 @@ func (e *Ec2Infoer) GetCurrentPrices(region string) (map[string]types.Price, err
 			OnDemandPrice: -1,
 		}
 		for zone, price := range sp {
-			metrics.ReportAmazonSpotPrice(region, zone, instanceType, price)
+			metrics.ReportAmazonSpotPrice(e.region, zone, instanceType, "", "", price)
 		}
 	}
 	return prices, nil
@@ -554,7 +554,7 @@ func (e *Ec2Infoer) GetServiceImages(service, region string) ([]types.Image, err
 	switch service {
 	case svcEks:
 		for _, k8sVersion := range []string{"1.15", "1.16", "1.17", "1.18", "1.19"} {
-			gpuImages, err := e.ec2Describer(region).DescribeImages(getEKSDescribeImagesInput(k8sVersion, true))
+			gpuImages, err := e.ec2Describer(e.region).DescribeImages(getEKSDescribeImagesInput(k8sVersion, true))
 			if err != nil {
 				return nil, err
 			}
@@ -568,7 +568,7 @@ func (e *Ec2Infoer) GetServiceImages(service, region string) ([]types.Image, err
 				serviceImages = append(serviceImages, types.NewImage(*latestImage.ImageId, k8sVersion, true))
 			}
 
-			images, err := e.ec2Describer(region).DescribeImages(getEKSDescribeImagesInput(k8sVersion, false))
+			images, err := e.ec2Describer(e.region).DescribeImages(getEKSDescribeImagesInput(k8sVersion, false))
 			if err != nil {
 				return nil, err
 			}
@@ -583,7 +583,7 @@ func (e *Ec2Infoer) GetServiceImages(service, region string) ([]types.Image, err
 			}
 		}
 	case svcPKE:
-		amazonImages, err := e.ec2Describer(region).DescribeImages(getPKEDescribeImagesInput())
+		amazonImages, err := e.ec2Describer(e.region).DescribeImages(getPKEDescribeImagesInput())
 		if err != nil {
 			return nil, err
 		}

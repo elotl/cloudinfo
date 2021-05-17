@@ -75,7 +75,7 @@ var (
 		Name:      "on_demand_price",
 		Help:      "On demand price for each instance type",
 	},
-		[]string{"provider", "region", "instanceType"},
+		[]string{"provider", "region", "instanceType", "vcpus", "memory"},
 	)
 )
 
@@ -190,11 +190,11 @@ var amazonSpotPriceGauge = prometheus.NewGaugeVec(prometheus.GaugeOpts{
 	Name:      "amazon_spot_price",
 	Help:      "spot price for each instance type",
 },
-	[]string{"region", "zone", "instanceType"},
+	[]string{"region", "zone", "instanceType", "vcpus", "memory"},
 )
 
-func ReportAmazonSpotPrice(region, zone, instanceType string, price float64) {
-	amazonSpotPriceGauge.WithLabelValues(region, zone, instanceType).Set(price)
+func ReportAmazonSpotPrice(region, zone, instanceType, vcpus, memory string, price float64) {
+	amazonSpotPriceGauge.WithLabelValues(region, zone, instanceType, vcpus, memory).Set(price)
 }
 
 // SpotPriceGauge collects metrics for the prometheus

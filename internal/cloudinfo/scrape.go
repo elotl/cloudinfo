@@ -80,7 +80,13 @@ func (sm *scrapingManager) scrapeServiceRegionProducts(ctx context.Context, serv
 
 	for _, vm := range values {
 		if vm.OnDemandPrice > 0 {
-			metrics.OnDemandPriceGauge.WithLabelValues(sm.provider, regionId, vm.Type).Set(vm.OnDemandPrice)
+			cpusStr := strconv.FormatFloat(vm.Cpus, 'f', -1, 64)
+			memStr := strconv.FormatFloat(vm.Mem, 'f', -1, 64)
+			metrics.OnDemandPriceGauge.WithLabelValues(sm.provider, regionId, vm.Type, cpusStr, memStr).Set(vm.OnDemandPrice)
+			for _, price := range vm.SpotPrice {
+				metrics.ReportAmazonSpotPrice(regionId, price.Zone, vm.Type, cpusStr, memStr, price.Price)
+			}
+
 		}
 	}
 
