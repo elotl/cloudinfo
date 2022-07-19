@@ -68,4 +68,4 @@ RUN sed -i "s|dataLocation: ./configs/|dataLocation: /etc/cloudinfo/serviceconfi
 
 ENV CLOUDINFO_SERVICELOADER_SERVICECONFIGLOCATION "/etc/cloudinfo/serviceconfig"
 
-CMD ["cloudinfo"]
+CMD ["cloudinfo", "--provider-amazon"]

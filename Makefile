@@ -5,7 +5,7 @@ OS = $(shell uname | tr A-Z a-z)
 # Project variables
 BUILD_PACKAGE ?= ./cmd/cloudinfo
 BINARY_NAME ?= cloudinfo
-DOCKER_IMAGE = banzaicloud/cloudinfo
+DOCKER_IMAGE = elotl/cloudinfo
 
 # Build variables
 BUILD_DIR ?= build
