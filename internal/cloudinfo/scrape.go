@@ -294,7 +294,16 @@ func (sm *scrapingManager) updateVirtualMachines(service, region string) error {
 				}
 			}
 
-			if vm.OnDemandPrice != 0 {
+			zonePrice := []types.ZonePrice{}
+			for zone, price := range prices.SpotPrice {
+				zonePrice = append(zonePrice, types.ZonePrice{
+					Zone:  zone,
+					Price: price,
+				})
+			}
+			vm.SpotPrice = zonePrice
+
+			if vm.OnDemandPrice != 0 || len(vm.SpotPrice) > 0 {
 				virtualMachines = append(virtualMachines, vm)
 				vmsInZone = append(vmsInZone, vm)
 			}
