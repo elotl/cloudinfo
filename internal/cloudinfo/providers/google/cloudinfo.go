@@ -41,21 +41,32 @@ var regionNames = map[string]string{
 	"asia-east1":              "Asia Pacific (Taiwan)",
 	"asia-east2":              "Asia Pacific (Hong Kong)",
 	"asia-northeast1":         "Asia Pacific (Tokyo)",
+	"asia-northeast2":         "Asia Pacific (Osaka)",
+	"asia-northeast3":         "Asia Pacific (Seoul)",
 	"asia-south1":             "Asia Pacific (Mumbai)",
+	"asia-south2":             "Asia Pacific (Delhi)",
 	"asia-southeast1":         "Asia Pacific (Singapore)",
+	"asia-southeast2":         "Asia Pacific (Jakarta)",
 	"australia-southeast1":    "Asia Pacific (Sydney)",
+	"australia-southeast2":    "Asia Pacific (Melbourne)",
 	"europe-north1":           "EU (Finland)",
+	"europe-central2":         "EU (Warsaw)",
 	"europe-west1":            "EU (Belgium)",
 	"europe-west2":            "EU (London)",
 	"europe-west3":            "EU (Frankfurt)",
 	"europe-west4":            "EU (Netherlands)",
+	"europe-west6":            "EU (Zurich)",
 	"northamerica-northeast1": "Canada (Montréal)",
+	"northamerica-northeast2": "Canada (Toronto)",
 	"southamerica-east1":      "South America (São Paulo)",
+	"southamerica-west1":      "South America (Santiago)",
 	"us-central1":             "US Central (Iowa)",
 	"us-east1":                "US East (South Carolina)",
 	"us-east4":                "US East (Northern Virginia)",
 	"us-west1":                "US West (Oregon)",
 	"us-west2":                "US West (Los Angeles)",
+	"us-west3":                "US West (Salt Lake City)",
+	"us-west4":                "US West (Las Vegas)",
 }
 
 // GceInfoer encapsulates the data and operations needed to access external resources
@@ -186,14 +197,17 @@ func (g *GceInfoer) Initialize() (map[string]map[string]types.Price, error) {
 			return nil, err
 		}
 		zonesInRegions[r] = zones
-		err = g.computeSvc.MachineTypes.List(g.projectId, zones[0]).Pages(context.TODO(), func(allMts *compute.MachineTypeList) error {
-			for region, price := range pricePerRegion {
+
+		for _, zone := range zones {
+			err = g.computeSvc.MachineTypes.List(g.projectId, zone).Pages(context.TODO(), func(allMts *compute.MachineTypeList) error {
+				region := r
+				price := pricePerRegion[region]
 				for _, mt := range allMts.Items {
 					if !cloudinfo.Contains(unsupportedInstanceTypes, mt.Name) {
-						if allPrices[region] == nil {
-							allPrices[region] = make(map[string]types.Price)
+						if allPrices[zone] == nil {
+							allPrices[zone] = make(map[string]types.Price)
 						}
-						prices := allPrices[region][mt.Name]
+						prices := allPrices[zone][mt.Name]
 
 						if mt.Name == "f1-micro" || mt.Name == "g1-small" {
 							prices.OnDemandPrice = price[mt.Name]["OnDemand"]
@@ -213,14 +227,14 @@ func (g *GceInfoer) Initialize() (map[string]map[string]types.Price, error) {
 						}
 						prices.SpotPrice = spotPrice
 
-						allPrices[region][mt.Name] = prices
+						allPrices[zone][mt.Name] = prices
 					}
 				}
+				return nil
+			})
+			if err != nil {
+				return nil, err
 			}
-			return nil
-		})
-		if err != nil {
-			return nil, err
 		}
 	}
 
@@ -321,42 +335,44 @@ func (g *GceInfoer) GetVirtualMachines(region string) ([]types.VMInfo, error) {
 	if err != nil {
 		return nil, err
 	}
-	err = g.computeSvc.MachineTypes.List(g.projectId, zones[0]).Pages(context.TODO(), func(allMts *compute.MachineTypeList) error {
-		for _, mt := range allMts.Items {
-			if _, ok := vmsMap[mt.Name]; !ok {
-				switch {
-				case mt.GuestCpus < 1:
-					// minimum 1 Gbps network performance for each virtual machine
-					ntwPerf = 1
-				case mt.GuestCpus > 8:
-					// theoretical maximum of 16 Gbps for each virtual machine
-					ntwPerf = 16
-				default:
-					// each vCPU has a 2 Gbps egress cap for peak performance
-					ntwPerf = uint(mt.GuestCpus * 2)
-				}
-				ntwMapper := newGceNetworkMapper()
-				ntwPerfCat, err := ntwMapper.MapNetworkPerf(fmt.Sprint(ntwPerf, " Gbit/s"))
-				if err != nil {
-					logger.Debug(emperror.Wrap(err, "failed to get network performance category").Error(),
-						map[string]interface{}{"instanceType": mt.Name})
-				}
-				vmsMap[mt.Name] = types.VMInfo{
-					Category:   g.getCategory(mt.Name),
-					Type:       mt.Name,
-					Cpus:       float64(mt.GuestCpus),
-					Mem:        float64(mt.MemoryMb) / 1024,
-					NtwPerf:    fmt.Sprintf("%d Gbit/s", ntwPerf),
-					NtwPerfCat: ntwPerfCat,
-					Zones:      zones,
-					Attributes: cloudinfo.Attributes(fmt.Sprint(mt.GuestCpus), fmt.Sprint(float64(mt.MemoryMb)/1024), ntwPerfCat, g.getCategory(mt.Name)),
+	for _, zone := range zones {
+		err = g.computeSvc.MachineTypes.List(g.projectId, zone).Pages(context.TODO(), func(allMts *compute.MachineTypeList) error {
+			for _, mt := range allMts.Items {
+				if _, ok := vmsMap[mt.Name]; !ok {
+					switch {
+					case mt.GuestCpus < 1:
+						// minimum 1 Gbps network performance for each virtual machine
+						ntwPerf = 1
+					case mt.GuestCpus > 8:
+						// theoretical maximum of 16 Gbps for each virtual machine
+						ntwPerf = 16
+					default:
+						// each vCPU has a 2 Gbps egress cap for peak performance
+						ntwPerf = uint(mt.GuestCpus * 2)
+					}
+					ntwMapper := newGceNetworkMapper()
+					ntwPerfCat, err := ntwMapper.MapNetworkPerf(fmt.Sprint(ntwPerf, " Gbit/s"))
+					if err != nil {
+						logger.Debug(emperror.Wrap(err, "failed to get network performance category").Error(),
+							map[string]interface{}{"instanceType": mt.Name})
+					}
+					vmsMap[mt.Name] = types.VMInfo{
+						Category:   g.getCategory(mt.Name),
+						Type:       mt.Name,
+						Cpus:       float64(mt.GuestCpus),
+						Mem:        float64(mt.MemoryMb) / 1024,
+						NtwPerf:    fmt.Sprintf("%d Gbit/s", ntwPerf),
+						NtwPerfCat: ntwPerfCat,
+						Zones:      zones,
+						Attributes: cloudinfo.Attributes(fmt.Sprint(mt.GuestCpus), fmt.Sprint(float64(mt.MemoryMb)/1024), ntwPerfCat, g.getCategory(mt.Name)),
+					}
 				}
 			}
+			return nil
+		})
+		if err != nil {
+			return nil, err
 		}
-		return nil
-	})
-	if err != nil {
-		return nil, err
 	}
 	var vms []types.VMInfo
 	for _, vm := range vmsMap {
