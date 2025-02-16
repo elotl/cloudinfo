@@ -203,7 +203,7 @@ func (g *GceInfoer) Initialize() (map[string]map[string]types.Price, error) {
 				region := r
 				price := pricePerRegion[region]
 				for _, mt := range allMts.Items {
-					if !cloudinfo.Contains(unsupportedInstanceTypes, mt.Name) {
+					if !cloudinfo.Contains(unsupportedInstanceTypes, mt.Name) && !strings.HasSuffix(mt.Name, "-metal") {
 						if allPrices[zone] == nil {
 							allPrices[zone] = make(map[string]types.Price)
 						}
@@ -243,6 +243,8 @@ func (g *GceInfoer) Initialize() (map[string]map[string]types.Price, error) {
 }
 
 func (g *GceInfoer) getPrice() (map[string]map[string]map[string]float64, error) {
+	logger := log.WithFields(g.log, map[string]interface{}{"service": "compute"})
+	logger.Debug("getting price")
 	svcList, err := g.cbSvc.Services.List().Fields("services/displayName", "services/name").Do()
 	if err != nil {
 		return nil, err
@@ -254,10 +256,17 @@ func (g *GceInfoer) getPrice() (map[string]map[string]map[string]float64, error)
 			compEngId = svc.Name
 		}
 	}
+	// Working around "Compute Engine" not found in svcList; presumably, list needs to be fetched as multiple pages
+	if compEngId == "" {
+		compEngId = "services/6F81-5844-456A"
+	}
 
 	price := make(map[string]map[string]map[string]float64)
 	err = g.cbSvc.Services.Skus.List(compEngId).Pages(context.Background(), func(response *cloudbilling.ListSkusResponse) error {
 		for _, sku := range response.Skus {
+			if strings.Contains(sku.Description, "Upgrade Premium") || strings.Contains(sku.Description, "DWS Defined Duration") {
+				continue
+			}
 			if sku.Category.ResourceGroup == "G1Small" || sku.Category.ResourceGroup == "F1Micro" {
 				priceInUsd, err := g.priceInUsd(sku.PricingInfo)
 				if err != nil {
@@ -274,25 +283,26 @@ func (g *GceInfoer) getPrice() (map[string]map[string]map[string]float64, error)
 						price[region]["f1-micro"] = g.priceFromSku(price, region, "f1-micro", sku.Category.UsageType, priceInUsd)
 					}
 				}
-			}
-			if sku.Category.ResourceGroup == "N1Standard" {
-				if !strings.Contains(sku.Description, "Upgrade Premium") {
-					priceInUsd, err := g.priceInUsd(sku.PricingInfo)
-					if err != nil {
-						return err
-					}
+			} else if sku.Category.ResourceGroup == "N1Standard" {
+				priceInUsd, err := g.priceInUsd(sku.PricingInfo)
+				if err != nil {
+					return err
+				}
 
-					for _, region := range sku.ServiceRegions {
-						if price[region] == nil {
-							price[region] = make(map[string]map[string]float64)
-						}
-						if strings.Contains(sku.Description, "Instance Ram") {
-							price[region][types.Memory] = g.priceFromSku(price, region, types.Memory, sku.Category.UsageType, priceInUsd)
-						} else {
-							price[region][types.CPU] = g.priceFromSku(price, region, types.CPU, sku.Category.UsageType, priceInUsd)
-						}
+				for _, region := range sku.ServiceRegions {
+					if price[region] == nil {
+						price[region] = make(map[string]map[string]float64)
+					}
+					if strings.Contains(sku.Description, "Instance Ram") {
+						price[region][types.Memory] = g.priceFromSku(price, region, types.Memory, sku.Category.UsageType, priceInUsd)
+					} else if strings.Contains(sku.Description, "Instance Core") {
+						price[region][types.CPU] = g.priceFromSku(price, region, types.CPU, sku.Category.UsageType, priceInUsd)
+					} else {
+						logger.Debug("ignoring N1Standard", map[string]interface{}{"sku": sku})
 					}
 				}
+			} else if sku.Category.UsageType == "OnDemand" {
+				logger.Debug("unrecognized sku.Category.ResourceGroup", map[string]interface{}{"sku": sku})
 			}
 		}
 		return nil
