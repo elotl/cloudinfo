@@ -47,6 +47,7 @@ var regionNames = map[string]string{
 	"asia-south2":             "Asia Pacific (Delhi)",
 	"asia-southeast1":         "Asia Pacific (Singapore)",
 	"asia-southeast2":         "Asia Pacific (Jakarta)",
+
 	"australia-southeast1":    "Asia Pacific (Sydney)",
 	"australia-southeast2":    "Asia Pacific (Melbourne)",
 	"europe-north1":           "EU (Finland)",
@@ -203,17 +204,28 @@ func (g *GceInfoer) Initialize() (map[string]map[string]types.Price, error) {
 				region := r
 				price := pricePerRegion[region]
 				for _, mt := range allMts.Items {
-					if !cloudinfo.Contains(unsupportedInstanceTypes, mt.Name) && !strings.HasSuffix(mt.Name, "-metal") {
+					if !cloudinfo.Contains(unsupportedInstanceTypes, mt.Name) && !strings.HasSuffix(mt.Name, "-metal") &&
+						!strings.HasPrefix(mt.Name, "m2-") && !strings.HasPrefix(mt.Name, "ct") {
 						if allPrices[zone] == nil {
 							allPrices[zone] = make(map[string]types.Price)
 						}
 						prices := allPrices[zone][mt.Name]
 
-						if mt.Name == "f1-micro" || mt.Name == "g1-small" {
+						nameSplit := strings.Split(mt.Name, "-")
+						family := nameSplit[0]
+						switch {
+						case mt.Name == "f1-micro" || mt.Name == "g1-small":
 							prices.OnDemandPrice = price[mt.Name]["OnDemand"]
-						} else {
+						case family == "n1" || family == "c2":
 							prices.OnDemandPrice = price[types.CPU]["OnDemand"]*float64(mt.GuestCpus) + price[types.Memory]["OnDemand"]*float64(mt.MemoryMb)/1024
+						case family == "m1":
+							prices.OnDemandPrice = price["m3-cpu"]["OnDemand"]*float64(mt.GuestCpus) + price["m3-memory"]["OnDemand"]*float64(mt.MemoryMb)/1024
+						case isSupportedFamily(family):
+							prices.OnDemandPrice = price[family+"-cpu"]["OnDemand"]*float64(mt.GuestCpus) + price[family+"-memory"]["OnDemand"]*float64(mt.MemoryMb)/1024
+						default:
+							g.log.Warn("could not get price", map[string]interface{}{"machineTypeName": mt.Name})
 						}
+						// TODO: update this code to make it zone-friendly and ordered
 						spotPrice := make(types.SpotPriceInfo)
 						for _, z := range zonesInRegions[region] {
 							if mt.Name == "f1-micro" || mt.Name == "g1-small" {
@@ -240,6 +252,12 @@ func (g *GceInfoer) Initialize() (map[string]map[string]types.Price, error) {
 
 	g.log.Debug("finished initializing price info")
 	return allPrices, nil
+}
+
+func isSupportedFamily(family string) bool {
+	return family == "a2" || family == "a3" || family == "c3" || family == "c3d" || family == "c4" ||
+		family == "e2" || family == "g2" || family == "h3" || family == "n2" || family == "n4" || family == "m3" ||
+		family == "c4a" || family == "t2a" || family == "n2d" || family == "c2d" || family == "t2d" || family == "z3"
 }
 
 func (g *GceInfoer) getPrice() (map[string]map[string]map[string]float64, error) {
@@ -301,8 +319,39 @@ func (g *GceInfoer) getPrice() (map[string]map[string]map[string]float64, error)
 						logger.Debug("ignoring N1Standard", map[string]interface{}{"sku": sku})
 					}
 				}
-			} else if sku.Category.UsageType == "OnDemand" {
-				logger.Debug("unrecognized sku.Category.ResourceGroup", map[string]interface{}{"sku": sku})
+			} else if (sku.Category.UsageType == "OnDemand" || sku.Category.UsageType == "Preemptible") &&
+				(sku.Category.ResourceGroup == "RAM" || sku.Category.ResourceGroup == "CPU") {
+				descSplit := strings.Split(sku.Description, " ")
+				if len(descSplit) < 4 {
+					continue
+				}
+				family := strings.ToLower(descSplit[0])
+				if !isSupportedFamily(family) {
+					continue
+				}
+				resMatch := (descSplit[1] == "Instance" && (descSplit[2] == "Ram" || descSplit[2] == "Core")) ||
+					(descSplit[2] == "Instance" && (descSplit[3] == "Ram" || descSplit[3] == "Core") &&
+					(descSplit[1] == "Memory-optimized" || descSplit[1] == "Arm" || descSplit[1] == "AMD"))
+				if !resMatch {
+					continue
+				}
+				priceInUsd, err := g.priceInUsd(sku.PricingInfo)
+				if err != nil {
+					return err
+				}
+
+				for _, region := range sku.ServiceRegions {
+					if price[region] == nil {
+						price[region] = make(map[string]map[string]float64)
+					}
+					if sku.Category.ResourceGroup == "RAM" {
+						memoryType := family + "-memory"
+						price[region][memoryType] = g.priceFromSku(price, region, memoryType, sku.Category.UsageType, priceInUsd)
+					} else { // sku.Category.ResourceGroup == "CPU"
+						cpuType := family + "-cpu"
+						price[region][cpuType] = g.priceFromSku(price, region, cpuType, sku.Category.UsageType, priceInUsd)
+					}
+				}
 			}
 		}
 		return nil
