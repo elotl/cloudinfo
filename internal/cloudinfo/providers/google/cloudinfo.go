@@ -222,6 +222,10 @@ func (g *GceInfoer) Initialize() (map[string]map[string]types.Price, error) {
 							prices.OnDemandPrice = price["m3-cpu"]["OnDemand"]*float64(mt.GuestCpus) + price["m3-memory"]["OnDemand"]*float64(mt.MemoryMb)/1024
 						case isSupportedFamily(family):
 							prices.OnDemandPrice = price[family+"-cpu"]["OnDemand"]*float64(mt.GuestCpus) + price[family+"-memory"]["OnDemand"]*float64(mt.MemoryMb)/1024
+							if prices.OnDemandPrice == 0 {
+								g.log.Error("On Demand price of 0 detected indicating that price wasn't available, Skipping type (mt.name): " + mt.Name)
+								continue
+							}
 						default:
 							g.log.Warn("could not get price", map[string]interface{}{"machineTypeName": mt.Name})
 						}
