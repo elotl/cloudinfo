@@ -258,7 +258,7 @@ func isSupportedFamily(family string) bool {
 	return family == "a2" || family == "a3" || family == "c3" || family == "c3d" || family == "c4" ||
 		family == "e2" || family == "g2" || family == "h3" || family == "n2" || family == "n4" || family == "m3" ||
 		family == "c4a" || family == "t2a" || family == "n2d" || family == "c2d" || family == "t2d" || family == "z3" ||
-		family == "c4d" || family == "m4"
+		family == "c4d" || family == "m4" || family == "a4"
 }
 
 func (g *GceInfoer) getPrice() (map[string]map[string]map[string]float64, error) {
