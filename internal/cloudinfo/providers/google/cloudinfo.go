@@ -38,15 +38,15 @@ import (
 const svcGke = "gke"
 
 var regionNames = map[string]string{
-	"asia-east1":              "Asia Pacific (Taiwan)",
-	"asia-east2":              "Asia Pacific (Hong Kong)",
-	"asia-northeast1":         "Asia Pacific (Tokyo)",
-	"asia-northeast2":         "Asia Pacific (Osaka)",
-	"asia-northeast3":         "Asia Pacific (Seoul)",
-	"asia-south1":             "Asia Pacific (Mumbai)",
-	"asia-south2":             "Asia Pacific (Delhi)",
-	"asia-southeast1":         "Asia Pacific (Singapore)",
-	"asia-southeast2":         "Asia Pacific (Jakarta)",
+	"asia-east1":      "Asia Pacific (Taiwan)",
+	"asia-east2":      "Asia Pacific (Hong Kong)",
+	"asia-northeast1": "Asia Pacific (Tokyo)",
+	"asia-northeast2": "Asia Pacific (Osaka)",
+	"asia-northeast3": "Asia Pacific (Seoul)",
+	"asia-south1":     "Asia Pacific (Mumbai)",
+	"asia-south2":     "Asia Pacific (Delhi)",
+	"asia-southeast1": "Asia Pacific (Singapore)",
+	"asia-southeast2": "Asia Pacific (Jakarta)",
 
 	"australia-southeast1":    "Asia Pacific (Sydney)",
 	"australia-southeast2":    "Asia Pacific (Melbourne)",
@@ -257,7 +257,8 @@ func (g *GceInfoer) Initialize() (map[string]map[string]types.Price, error) {
 func isSupportedFamily(family string) bool {
 	return family == "a2" || family == "a3" || family == "c3" || family == "c3d" || family == "c4" ||
 		family == "e2" || family == "g2" || family == "h3" || family == "n2" || family == "n4" || family == "m3" ||
-		family == "c4a" || family == "t2a" || family == "n2d" || family == "c2d" || family == "t2d" || family == "z3"
+		family == "c4a" || family == "t2a" || family == "n2d" || family == "c2d" || family == "t2d" || family == "z3" ||
+		family == "c4d" || family == "m4" || family == "a4"
 }
 
 func (g *GceInfoer) getPrice() (map[string]map[string]map[string]float64, error) {
@@ -331,7 +332,7 @@ func (g *GceInfoer) getPrice() (map[string]map[string]map[string]float64, error)
 				}
 				resMatch := (descSplit[1] == "Instance" && (descSplit[2] == "Ram" || descSplit[2] == "Core")) ||
 					(descSplit[2] == "Instance" && (descSplit[3] == "Ram" || descSplit[3] == "Core") &&
-					(descSplit[1] == "Memory-optimized" || descSplit[1] == "Arm" || descSplit[1] == "AMD"))
+						(descSplit[1] == "Memory-optimized" || descSplit[1] == "Arm" || descSplit[1] == "AMD"))
 				if !resMatch {
 					continue
 				}
