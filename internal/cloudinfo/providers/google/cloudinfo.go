@@ -38,24 +38,50 @@ import (
 const svcGke = "gke"
 
 var regionNames = map[string]string{
-	"asia-east1":              "Asia Pacific (Taiwan)",
-	"asia-east2":              "Asia Pacific (Hong Kong)",
-	"asia-northeast1":         "Asia Pacific (Tokyo)",
-	"asia-south1":             "Asia Pacific (Mumbai)",
-	"asia-southeast1":         "Asia Pacific (Singapore)",
+	"africa-south1":   "Africa (Johannesburg)",
+	"asia-east1":      "Asia Pacific (Taiwan)",
+	"asia-east2":      "Asia Pacific (Hong Kong)",
+	"asia-northeast1": "Asia Pacific (Tokyo)",
+	"asia-northeast2": "Asia Pacific (Osaka)",
+	"asia-northeast3": "Asia Pacific (Seoul)",
+	"asia-south1":     "Asia Pacific (Mumbai)",
+	"asia-south2":     "Asia Pacific (Delhi)",
+	"asia-southeast1": "Asia Pacific (Singapore)",
+	"asia-southeast2": "Asia Pacific (Jakarta)",
+	"asia-southeast3": "Asia Pacific (Bangkok)",
+
 	"australia-southeast1":    "Asia Pacific (Sydney)",
+	"australia-southeast2":    "Asia Pacific (Melbourne)",
+	"europe-central2":         "EU (Warsaw)",
 	"europe-north1":           "EU (Finland)",
+	"europe-north2":           "EU (Sweden)",
+	"europe-southwest1":       "EU (Madrid)",
 	"europe-west1":            "EU (Belgium)",
+	"europe-west10":           "EU (Berlin)",
+	"europe-west12":           "EU (Turin)",
 	"europe-west2":            "EU (London)",
 	"europe-west3":            "EU (Frankfurt)",
 	"europe-west4":            "EU (Netherlands)",
+	"europe-west6":            "EU (Zurich)",
+	"europe-west8":            "EU (Milan)",
+	"europe-west9":            "EU (Paris)",
+	"me-central1":             "Middle East (Doha)",
+//	"me-central2":             "Middle East (Dammam)", *permission issue*
+	"me-west1":                "Middle East (Tel Aviv)",
 	"northamerica-northeast1": "Canada (Montréal)",
+	"northamerica-northeast2": "Canada (Toronto)",
+	"northamerica-south1":     "Mexico (Queretaro)",
 	"southamerica-east1":      "South America (São Paulo)",
+	"southamerica-west1":      "South America (Santiago)",
 	"us-central1":             "US Central (Iowa)",
 	"us-east1":                "US East (South Carolina)",
 	"us-east4":                "US East (Northern Virginia)",
+	"us-east5":                "US East (Columbus, Ohio)",
+	"us-south1":               "US West (Dallas, TX)",
 	"us-west1":                "US West (Oregon)",
 	"us-west2":                "US West (Los Angeles)",
+	"us-west3":                "US West (Salt Lake City)",
+	"us-west4":                "US West (Las Vegas)",
 }
 
 // GceInfoer encapsulates the data and operations needed to access external resources
@@ -186,20 +212,38 @@ func (g *GceInfoer) Initialize() (map[string]map[string]types.Price, error) {
 			return nil, err
 		}
 		zonesInRegions[r] = zones
-		err = g.computeSvc.MachineTypes.List(g.projectId, zones[0]).Pages(context.TODO(), func(allMts *compute.MachineTypeList) error {
-			for region, price := range pricePerRegion {
-				for _, mt := range allMts.Items {
-					if !cloudinfo.Contains(unsupportedInstanceTypes, mt.Name) {
-						if allPrices[region] == nil {
-							allPrices[region] = make(map[string]types.Price)
-						}
-						prices := allPrices[region][mt.Name]
 
-						if mt.Name == "f1-micro" || mt.Name == "g1-small" {
-							prices.OnDemandPrice = price[mt.Name]["OnDemand"]
-						} else {
-							prices.OnDemandPrice = price[types.CPU]["OnDemand"]*float64(mt.GuestCpus) + price[types.Memory]["OnDemand"]*float64(mt.MemoryMb)/1024
+		for _, zone := range zones {
+			err = g.computeSvc.MachineTypes.List(g.projectId, zone).Pages(context.TODO(), func(allMts *compute.MachineTypeList) error {
+				region := r
+				price := pricePerRegion[region]
+				for _, mt := range allMts.Items {
+					if !cloudinfo.Contains(unsupportedInstanceTypes, mt.Name) && !strings.HasSuffix(mt.Name, "-metal") &&
+						!strings.HasPrefix(mt.Name, "m2-") && !strings.HasPrefix(mt.Name, "ct") && !strings.HasPrefix(mt.Name, "tpu") {
+						if allPrices[zone] == nil {
+							allPrices[zone] = make(map[string]types.Price)
 						}
+						prices := allPrices[zone][mt.Name]
+
+						nameSplit := strings.Split(mt.Name, "-")
+						family := nameSplit[0]
+						switch {
+						case mt.Name == "f1-micro" || mt.Name == "g1-small":
+							prices.OnDemandPrice = price[mt.Name]["OnDemand"]
+						case family == "n1" || family == "c2":
+							prices.OnDemandPrice = price[types.CPU]["OnDemand"]*float64(mt.GuestCpus) + price[types.Memory]["OnDemand"]*float64(mt.MemoryMb)/1024
+						case family == "m1":
+							prices.OnDemandPrice = price["m3-cpu"]["OnDemand"]*float64(mt.GuestCpus) + price["m3-memory"]["OnDemand"]*float64(mt.MemoryMb)/1024
+						case isSupportedFamily(family):
+							prices.OnDemandPrice = price[family+"-cpu"]["OnDemand"]*float64(mt.GuestCpus) + price[family+"-memory"]["OnDemand"]*float64(mt.MemoryMb)/1024
+							if prices.OnDemandPrice == 0 {
+								g.log.Error("On Demand price of 0 detected indicating that price wasn't available, Skipping type (mt.name): " + mt.Name)
+								continue
+							}
+						default:
+							g.log.Warn("could not get price", map[string]interface{}{"machineTypeName": mt.Name})
+						}
+						// TODO: update this code to make it zone-friendly and ordered
 						spotPrice := make(types.SpotPriceInfo)
 						for _, z := range zonesInRegions[region] {
 							if mt.Name == "f1-micro" || mt.Name == "g1-small" {
@@ -213,14 +257,14 @@ func (g *GceInfoer) Initialize() (map[string]map[string]types.Price, error) {
 						}
 						prices.SpotPrice = spotPrice
 
-						allPrices[region][mt.Name] = prices
+						allPrices[zone][mt.Name] = prices
 					}
 				}
+				return nil
+			})
+			if err != nil {
+				return nil, err
 			}
-			return nil
-		})
-		if err != nil {
-			return nil, err
 		}
 	}
 
@@ -228,7 +272,17 @@ func (g *GceInfoer) Initialize() (map[string]map[string]types.Price, error) {
 	return allPrices, nil
 }
 
+func isSupportedFamily(family string) bool {
+	return family == "a2" || family == "a3" || family == "c3" || family == "c3d" || family == "c4" ||
+		family == "e2" || family == "g2" || family == "h3" || family == "n2" || family == "n4" || family == "m3" ||
+		family == "c4a" || family == "t2a" || family == "n2d" || family == "c2d" || family == "t2d" || family == "z3" ||
+		family == "c4d" || family == "m4" || family == "a4" || family == "n4a" || family == "n4d" ||
+		family == "g4" || family == "a4x" || family == "h4d"
+}
+
 func (g *GceInfoer) getPrice() (map[string]map[string]map[string]float64, error) {
+	logger := log.WithFields(g.log, map[string]interface{}{"service": "compute"})
+	logger.Debug("getting price")
 	svcList, err := g.cbSvc.Services.List().Fields("services/displayName", "services/name").Do()
 	if err != nil {
 		return nil, err
@@ -240,10 +294,17 @@ func (g *GceInfoer) getPrice() (map[string]map[string]map[string]float64, error)
 			compEngId = svc.Name
 		}
 	}
+	// Working around "Compute Engine" not found in svcList; presumably, list needs to be fetched as multiple pages
+	if compEngId == "" {
+		compEngId = "services/6F81-5844-456A"
+	}
 
 	price := make(map[string]map[string]map[string]float64)
 	err = g.cbSvc.Services.Skus.List(compEngId).Pages(context.Background(), func(response *cloudbilling.ListSkusResponse) error {
 		for _, sku := range response.Skus {
+			if strings.Contains(sku.Description, "Upgrade Premium") || strings.Contains(sku.Description, "DWS Defined Duration") {
+				continue
+			}
 			if sku.Category.ResourceGroup == "G1Small" || sku.Category.ResourceGroup == "F1Micro" {
 				priceInUsd, err := g.priceInUsd(sku.PricingInfo)
 				if err != nil {
@@ -260,23 +321,55 @@ func (g *GceInfoer) getPrice() (map[string]map[string]map[string]float64, error)
 						price[region]["f1-micro"] = g.priceFromSku(price, region, "f1-micro", sku.Category.UsageType, priceInUsd)
 					}
 				}
-			}
-			if sku.Category.ResourceGroup == "N1Standard" {
-				if !strings.Contains(sku.Description, "Upgrade Premium") {
-					priceInUsd, err := g.priceInUsd(sku.PricingInfo)
-					if err != nil {
-						return err
-					}
+			} else if sku.Category.ResourceGroup == "N1Standard" {
+				priceInUsd, err := g.priceInUsd(sku.PricingInfo)
+				if err != nil {
+					return err
+				}
 
-					for _, region := range sku.ServiceRegions {
-						if price[region] == nil {
-							price[region] = make(map[string]map[string]float64)
-						}
-						if strings.Contains(sku.Description, "Instance Ram") {
-							price[region][types.Memory] = g.priceFromSku(price, region, types.Memory, sku.Category.UsageType, priceInUsd)
-						} else {
-							price[region][types.CPU] = g.priceFromSku(price, region, types.CPU, sku.Category.UsageType, priceInUsd)
-						}
+				for _, region := range sku.ServiceRegions {
+					if price[region] == nil {
+						price[region] = make(map[string]map[string]float64)
+					}
+					if strings.Contains(sku.Description, "Instance Ram") {
+						price[region][types.Memory] = g.priceFromSku(price, region, types.Memory, sku.Category.UsageType, priceInUsd)
+					} else if strings.Contains(sku.Description, "Instance Core") {
+						price[region][types.CPU] = g.priceFromSku(price, region, types.CPU, sku.Category.UsageType, priceInUsd)
+					} else {
+						logger.Debug("ignoring N1Standard", map[string]interface{}{"sku": sku})
+					}
+				}
+			} else if (sku.Category.UsageType == "OnDemand" || sku.Category.UsageType == "Preemptible") &&
+				(sku.Category.ResourceGroup == "RAM" || sku.Category.ResourceGroup == "CPU") {
+				descSplit := strings.Split(sku.Description, " ")
+				if len(descSplit) < 4 {
+					continue
+				}
+				family := strings.ToLower(descSplit[0])
+				if !isSupportedFamily(family) {
+					continue
+				}
+				resMatch := (descSplit[1] == "Instance" && (descSplit[2] == "Ram" || descSplit[2] == "Core")) ||
+					(descSplit[2] == "Instance" && (descSplit[3] == "Ram" || descSplit[3] == "Core") &&
+						(descSplit[1] == "Memory-optimized" || descSplit[1] == "Arm" || descSplit[1] == "AMD"))
+				if !resMatch {
+					continue
+				}
+				priceInUsd, err := g.priceInUsd(sku.PricingInfo)
+				if err != nil {
+					return err
+				}
+
+				for _, region := range sku.ServiceRegions {
+					if price[region] == nil {
+						price[region] = make(map[string]map[string]float64)
+					}
+					if sku.Category.ResourceGroup == "RAM" {
+						memoryType := family + "-memory"
+						price[region][memoryType] = g.priceFromSku(price, region, memoryType, sku.Category.UsageType, priceInUsd)
+					} else { // sku.Category.ResourceGroup == "CPU"
+						cpuType := family + "-cpu"
+						price[region][cpuType] = g.priceFromSku(price, region, cpuType, sku.Category.UsageType, priceInUsd)
 					}
 				}
 			}
@@ -321,42 +414,44 @@ func (g *GceInfoer) GetVirtualMachines(region string) ([]types.VMInfo, error) {
 	if err != nil {
 		return nil, err
 	}
-	err = g.computeSvc.MachineTypes.List(g.projectId, zones[0]).Pages(context.TODO(), func(allMts *compute.MachineTypeList) error {
-		for _, mt := range allMts.Items {
-			if _, ok := vmsMap[mt.Name]; !ok {
-				switch {
-				case mt.GuestCpus < 1:
-					// minimum 1 Gbps network performance for each virtual machine
-					ntwPerf = 1
-				case mt.GuestCpus > 8:
-					// theoretical maximum of 16 Gbps for each virtual machine
-					ntwPerf = 16
-				default:
-					// each vCPU has a 2 Gbps egress cap for peak performance
-					ntwPerf = uint(mt.GuestCpus * 2)
-				}
-				ntwMapper := newGceNetworkMapper()
-				ntwPerfCat, err := ntwMapper.MapNetworkPerf(fmt.Sprint(ntwPerf, " Gbit/s"))
-				if err != nil {
-					logger.Debug(emperror.Wrap(err, "failed to get network performance category").Error(),
-						map[string]interface{}{"instanceType": mt.Name})
-				}
-				vmsMap[mt.Name] = types.VMInfo{
-					Category:   g.getCategory(mt.Name),
-					Type:       mt.Name,
-					Cpus:       float64(mt.GuestCpus),
-					Mem:        float64(mt.MemoryMb) / 1024,
-					NtwPerf:    fmt.Sprintf("%d Gbit/s", ntwPerf),
-					NtwPerfCat: ntwPerfCat,
-					Zones:      zones,
-					Attributes: cloudinfo.Attributes(fmt.Sprint(mt.GuestCpus), fmt.Sprint(float64(mt.MemoryMb)/1024), ntwPerfCat, g.getCategory(mt.Name)),
+	for _, zone := range zones {
+		err = g.computeSvc.MachineTypes.List(g.projectId, zone).Pages(context.TODO(), func(allMts *compute.MachineTypeList) error {
+			for _, mt := range allMts.Items {
+				if _, ok := vmsMap[mt.Name]; !ok {
+					switch {
+					case mt.GuestCpus < 1:
+						// minimum 1 Gbps network performance for each virtual machine
+						ntwPerf = 1
+					case mt.GuestCpus > 8:
+						// theoretical maximum of 16 Gbps for each virtual machine
+						ntwPerf = 16
+					default:
+						// each vCPU has a 2 Gbps egress cap for peak performance
+						ntwPerf = uint(mt.GuestCpus * 2)
+					}
+					ntwMapper := newGceNetworkMapper()
+					ntwPerfCat, err := ntwMapper.MapNetworkPerf(fmt.Sprint(ntwPerf, " Gbit/s"))
+					if err != nil {
+						logger.Debug(emperror.Wrap(err, "failed to get network performance category").Error(),
+							map[string]interface{}{"instanceType": mt.Name})
+					}
+					vmsMap[mt.Name] = types.VMInfo{
+						Category:   g.getCategory(mt.Name),
+						Type:       mt.Name,
+						Cpus:       float64(mt.GuestCpus),
+						Mem:        float64(mt.MemoryMb) / 1024,
+						NtwPerf:    fmt.Sprintf("%d Gbit/s", ntwPerf),
+						NtwPerfCat: ntwPerfCat,
+						Zones:      zones,
+						Attributes: cloudinfo.Attributes(fmt.Sprint(mt.GuestCpus), fmt.Sprint(float64(mt.MemoryMb)/1024), ntwPerfCat, g.getCategory(mt.Name)),
+					}
 				}
 			}
+			return nil
+		})
+		if err != nil {
+			return nil, err
 		}
-		return nil
-	})
-	if err != nil {
-		return nil, err
 	}
 	var vms []types.VMInfo
 	for _, vm := range vmsMap {
