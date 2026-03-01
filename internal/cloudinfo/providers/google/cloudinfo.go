@@ -38,6 +38,7 @@ import (
 const svcGke = "gke"
 
 var regionNames = map[string]string{
+	"africa-south1":   "Africa (Johannesburg)",
 	"asia-east1":      "Asia Pacific (Taiwan)",
 	"asia-east2":      "Asia Pacific (Hong Kong)",
 	"asia-northeast1": "Asia Pacific (Tokyo)",
@@ -47,23 +48,36 @@ var regionNames = map[string]string{
 	"asia-south2":     "Asia Pacific (Delhi)",
 	"asia-southeast1": "Asia Pacific (Singapore)",
 	"asia-southeast2": "Asia Pacific (Jakarta)",
+	"asia-southeast3": "Asia Pacific (Bangkok)",
 
 	"australia-southeast1":    "Asia Pacific (Sydney)",
 	"australia-southeast2":    "Asia Pacific (Melbourne)",
-	"europe-north1":           "EU (Finland)",
 	"europe-central2":         "EU (Warsaw)",
+	"europe-north1":           "EU (Finland)",
+	"europe-north2":           "EU (Sweden)",
+	"europe-southwest1":       "EU (Madrid)",
 	"europe-west1":            "EU (Belgium)",
+	"europe-west10":           "EU (Berlin)",
+	"europe-west12":           "EU (Turin)",
 	"europe-west2":            "EU (London)",
 	"europe-west3":            "EU (Frankfurt)",
 	"europe-west4":            "EU (Netherlands)",
 	"europe-west6":            "EU (Zurich)",
+	"europe-west8":            "EU (Milan)",
+	"europe-west9":            "EU (Paris)",
+	"me-central1":             "Middle East (Doha)",
+//	"me-central2":             "Middle East (Dammam)", *permission issue*
+	"me-west1":                "Middle East (Tel Aviv)",
 	"northamerica-northeast1": "Canada (Montréal)",
 	"northamerica-northeast2": "Canada (Toronto)",
+	"northamerica-south1":     "Mexico (Queretaro)",
 	"southamerica-east1":      "South America (São Paulo)",
 	"southamerica-west1":      "South America (Santiago)",
 	"us-central1":             "US Central (Iowa)",
 	"us-east1":                "US East (South Carolina)",
 	"us-east4":                "US East (Northern Virginia)",
+	"us-east5":                "US East (Columbus, Ohio)",
+	"us-south1":               "US West (Dallas, TX)",
 	"us-west1":                "US West (Oregon)",
 	"us-west2":                "US West (Los Angeles)",
 	"us-west3":                "US West (Salt Lake City)",
@@ -205,7 +219,7 @@ func (g *GceInfoer) Initialize() (map[string]map[string]types.Price, error) {
 				price := pricePerRegion[region]
 				for _, mt := range allMts.Items {
 					if !cloudinfo.Contains(unsupportedInstanceTypes, mt.Name) && !strings.HasSuffix(mt.Name, "-metal") &&
-						!strings.HasPrefix(mt.Name, "m2-") && !strings.HasPrefix(mt.Name, "ct") {
+						!strings.HasPrefix(mt.Name, "m2-") && !strings.HasPrefix(mt.Name, "ct") && !strings.HasPrefix(mt.Name, "tpu") {
 						if allPrices[zone] == nil {
 							allPrices[zone] = make(map[string]types.Price)
 						}
@@ -262,7 +276,8 @@ func isSupportedFamily(family string) bool {
 	return family == "a2" || family == "a3" || family == "c3" || family == "c3d" || family == "c4" ||
 		family == "e2" || family == "g2" || family == "h3" || family == "n2" || family == "n4" || family == "m3" ||
 		family == "c4a" || family == "t2a" || family == "n2d" || family == "c2d" || family == "t2d" || family == "z3" ||
-		family == "c4d" || family == "m4" || family == "a4"
+		family == "c4d" || family == "m4" || family == "a4" || family == "n4a" || family == "n4d" ||
+		family == "g4" || family == "a4x" || family == "h4d"
 }
 
 func (g *GceInfoer) getPrice() (map[string]map[string]map[string]float64, error) {
